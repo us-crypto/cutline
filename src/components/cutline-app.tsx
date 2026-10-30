@@ -20,7 +20,6 @@ import {
   formatClock,
   FORMATS,
   splitCue,
-  wordsToCues,
   type CaptionCue,
   type CaptionPlace,
   type CaptionPlate,
@@ -262,25 +261,20 @@ export function CutlineApp() {
     setStatus("Pulling the speech…");
     setSuggestion(null);
     try {
-      const result = await readSpeech(clip.file, trimIn, trimOut, (done, total) => {
-        setStatus(`Reading section ${Math.min(done + 1, total)} of ${total}`);
+      const result = await readSpeech(clip.file, trimIn, trimOut, (message) => {
+        setStatus(message);
       });
-      let next = wordsToCues(result.words);
-      if (!next.length && result.fallbackText.length) {
-        next = result.fallbackText.map((row) => ({ id: cueId(), ...row }));
-      }
-      if (!next.length) {
-        setError("No English speech in that section. Type a line at the playhead.");
+      if (!result.cues.length) {
+        setError(result.skipped || "No English speech in that section. Type a line at the playhead.");
         setStatus("");
         return;
       }
-      setCues(next);
+      setCues(result.cues);
       setCleanFrom(0);
-      const english = !result.language || result.language.toLowerCase().startsWith("en");
       setStatus(
-        english
-          ? `${next.length} lines. Fix anything that sounds off.`
-          : "Those lines may not be English. Edit them before you export.",
+        result.skipped
+          ? `${result.cues.length} English lines. ${result.skipped}`
+          : `${result.cues.length} English lines. Punctuation and line breaks are already in.`,
       );
     } catch (reason) {
       setError(messageOf(reason));
@@ -602,7 +596,7 @@ export function CutlineApp() {
                   <Captions className="mx-auto mb-3 size-6 text-amber" aria-hidden="true" />
                   <p className="text-paper">No lines yet.</p>
                   <p className="mt-1 text-sm text-mist">
-                    Read the spoken English, or write a line at the playhead.
+                    Detects the language, keeps the English, and writes the captions.
                   </p>
                 </div>
               ) : (
@@ -850,7 +844,7 @@ function Landing({
       <ol className="mt-8 grid gap-3 md:grid-cols-3">
         {[
           ["01", "Frame it", "Short is 1080×1920. Long is 1920×1080. Fill crops. Fit letterboxes."],
-          ["02", "Read the English", "Speech becomes timed lines. Rewrite any of them. Suggest a tighter in and out."],
+          ["02", "Read the English", "Language is detected first. Only English is written into timed captions."],
           ["03", "Export the MP4", "Captions are burned in. Upload the file to Shorts or YouTube."],
         ].map(([index, title, copy]) => (
           <li key={index} className="rounded-card bg-bay p-4 ring-hairline">

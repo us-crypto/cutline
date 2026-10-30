@@ -1,6 +1,18 @@
-import { transcribeChunk } from "@/lib/ai.functions";
+import { shapeEnglish, transcribeChunk } from "@/lib/ai.functions";
 import { paintCaption } from "@/lib/burn";
-import { cueAt, type CaptionCue, type FitMode, type FormatId, type Look, type Word, FORMATS } from "@/lib/captions";
+import {
+  cueAt,
+  cueId,
+  languageName,
+  looksEnglish,
+  wordsToCues,
+  type CaptionCue,
+  type FitMode,
+  type FormatId,
+  type Look,
+  type Word,
+  FORMATS,
+} from "@/lib/captions";
 
 const CHUNK_SECONDS = 110;
 export const MAX_READ_SECONDS = 30 * 60;
@@ -58,37 +70,96 @@ async function extractChunk(file: File, start: number, end: number): Promise<Blo
   }
 }
 
+function cuesFromLines(words: Word[], lines: { from: number; to: number; text: string }[]): CaptionCue[] | null {
+  if (!lines.length) return [];
+  const cues: CaptionCue[] = [];
+  let cursor = 0;
+  for (const line of lines) {
+    const from = line.from;
+    const to = line.to;
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from !== cursor || to < from || to >= words.length) {
+      return null;
+    }
+    if (line.text) {
+      cues.push({
+        id: cueId(),
+        start: words[from].start,
+        end: Math.max(words[to].end, words[from].start + 0.3),
+        text: line.text,
+      });
+    }
+    cursor = to + 1;
+  }
+  if (cursor < words.length) return null;
+  return cues;
+}
+
+async function writeEnglish(words: Word[]): Promise<CaptionCue[]> {
+  const cues: CaptionCue[] = [];
+  for (let index = 0; index < words.length; index += 180) {
+    const slice = words.slice(index, index + 180);
+    const shaped = await shapeEnglish({ data: { words: slice.map((word) => ({ text: word.text })) } });
+    if (!shaped.ok || !shaped.english) {
+      cues.push(...wordsToCues(slice));
+      continue;
+    }
+    const next = cuesFromLines(slice, shaped.lines);
+    cues.push(...(next ?? wordsToCues(slice)));
+  }
+  return cues;
+}
+
 export async function readSpeech(
   file: File,
   start: number,
   end: number,
-  onProgress: (done: number, total: number) => void,
-): Promise<{ words: Word[]; language: string; fallbackText: { text: string; start: number; end: number }[] }> {
+  onProgress: (message: string) => void,
+): Promise<{ cues: CaptionCue[]; language: string; skipped: string }> {
   const span = Math.max(0, end - start);
   if (span < 0.3) throw new Error("That trim is too short to read.");
   if (span > MAX_READ_SECONDS + 0.25) {
     throw new Error("Speech reading covers 30 minutes at a time. Pull the out point in, then read again.");
   }
   const total = Math.ceil(span / CHUNK_SECONDS);
-  const words: Word[] = [];
-  const fallbackText: { text: string; start: number; end: number }[] = [];
+  const cues: CaptionCue[] = [];
+  const skipped: string[] = [];
   let language = "";
   for (let index = 0; index < total; index++) {
     const chunkStart = start + index * CHUNK_SECONDS;
     const chunkEnd = Math.min(end, chunkStart + CHUNK_SECONDS);
-    onProgress(index, total);
+    onProgress(`Hearing section ${index + 1} of ${total}`);
     const audio = await extractChunk(file, chunkStart, chunkEnd);
     const audioBase64 = await blobToBase64(audio);
-    const result = await transcribeChunk({ data: { audioBase64, offset: chunkStart } });
-    if (!result.ok) throw new Error(result.error);
-    if (!language && result.language) language = result.language;
-    if (result.words.length) words.push(...result.words);
-    else if (result.text.trim()) {
-      fallbackText.push({ text: result.text.trim(), start: chunkStart, end: chunkEnd });
+    const detected = await transcribeChunk({ data: { audioBase64, offset: chunkStart, mode: "detect" } });
+    if (!detected.ok) throw new Error(detected.error);
+    if (!language && detected.language) language = detected.language;
+    const heard = detected.words.map((word) => word.text).join(" ") || detected.text;
+    if (!heard.trim()) continue;
+    if (!looksEnglish(heard, detected.language)) {
+      skipped.push(`${languageName(detected.language)} ${formatSpan(chunkStart, chunkEnd)}`);
+      continue;
     }
+    onProgress(`Writing English captions ${index + 1} of ${total}`);
+    const formatted = await transcribeChunk({ data: { audioBase64, offset: chunkStart, mode: "english" } });
+    const words = formatted.ok && formatted.words.length ? formatted.words : detected.words;
+    if (!words.length) continue;
+    cues.push(...(await writeEnglish(words)));
   }
-  onProgress(total, total);
-  return { words, language, fallbackText };
+  onProgress("Captions ready");
+  return {
+    cues,
+    language,
+    skipped: skipped.length ? `Skipped non-English speech: ${skipped.join(", ")}.` : "",
+  };
+}
+
+function formatSpan(start: number, end: number): string {
+  const clock = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  };
+  return `${clock(start)}–${clock(end)}`;
 }
 
 export async function exportCaptionedMp4(options: {

@@ -64,7 +64,7 @@ async function grok(system: string, user: string, maxTokens: number): Promise<st
 export const transcribeChunk = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Bad request");
-    const data = input as { audioBase64?: unknown; offset?: unknown };
+    const data = input as { audioBase64?: unknown; offset?: unknown; mode?: unknown };
     if (typeof data.audioBase64 !== "string" || data.audioBase64.length < 32) {
       throw new Error("No audio in that section.");
     }
@@ -73,7 +73,8 @@ export const transcribeChunk = createServerFn({ method: "POST" })
     if (!Number.isFinite(offset) || offset < 0 || offset > 60 * 60 * 6) {
       throw new Error("Bad time offset.");
     }
-    return { audioBase64: data.audioBase64, offset };
+    const mode = data.mode === "english" ? "english" : "detect";
+    return { audioBase64: data.audioBase64, offset, mode };
   })
   .handler(async ({ data }): Promise<Ok<{ words: Word[]; language: string; text: string }> | Err> => {
     const key = apiKey();
@@ -83,8 +84,10 @@ export const transcribeChunk = createServerFn({ method: "POST" })
       const file = new File([bytes], "speech.webm", { type: "audio/webm" });
       const form = new FormData();
       form.append("model", "grok-voice-transcribe-2.0");
-      form.append("language", "en");
-      form.append("format", "true");
+      if (data.mode === "english") {
+        form.append("language", "en");
+        form.append("format", "true");
+      }
       form.append("file", file);
       const res = await fetch("https://api.x.ai/v1/stt", {
         method: "POST",
@@ -154,6 +157,46 @@ export const cleanLines = createServerFn({ method: "POST" })
       };
     } catch (error) {
       return fail(error instanceof Error ? error.message : "Couldn't clean those lines.");
+    }
+  });
+
+export const shapeEnglish = createServerFn({ method: "POST" })
+  .validator((input: unknown) => {
+    if (!input || typeof input !== "object") throw new Error("Bad request");
+    const words = (input as { words?: unknown }).words;
+    if (!Array.isArray(words) || words.length < 1 || words.length > 220) {
+      throw new Error("Send 1 to 220 words.");
+    }
+    return {
+      words: words.map((word) => {
+        if (!word || typeof word !== "object") throw new Error("Bad word.");
+        const row = word as { text?: unknown };
+        return String(row.text ?? "").slice(0, 80);
+      }),
+    };
+  })
+  .handler(async ({ data }): Promise<Ok<{ english: boolean; lines: { from: number; to: number; text: string }[] }> | Err> => {
+    try {
+      const text = await grok(
+        "You write on-screen English captions from timed speech. First decide if the words are English. If they are not, return {\"english\":false,\"lines\":[]}. If they are, return {\"english\":true,\"lines\":[{\"from\":0,\"to\":4,\"text\":\"Correct caption.\"}]}. from and to are inclusive word indexes. Cover the words in order with no gaps or overlaps. Make the English correct: spelling, casing, punctuation, and written numbers, money, and times. Keep names. Do not invent speech and do not translate another language. One line stays under 42 characters. Break at a phrase. Drop a lone um or uh.",
+        JSON.stringify({ words: data.words }),
+        1800,
+      );
+      const parsed = extractJson(text) as { english?: unknown; lines?: unknown };
+      if (parsed.english === false) return { ok: true, english: false, lines: [] };
+      if (!Array.isArray(parsed.lines)) return fail("Captions came back unreadable.");
+      const lines = parsed.lines.map((line) => {
+        if (!line || typeof line !== "object") throw new Error("Bad caption line.");
+        const row = line as { from?: unknown; to?: unknown; text?: unknown };
+        return {
+          from: Number(row.from),
+          to: Number(row.to),
+          text: String(row.text ?? "").replace(/\s+/g, " ").trim().slice(0, 220),
+        };
+      });
+      return { ok: true, english: true, lines };
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : "Couldn't write the English captions.");
     }
   });
 

@@ -48,6 +48,58 @@ export function formatClock(seconds: number): string {
   return `${mins}:${secs.toFixed(1).padStart(4, "0")}`;
 }
 
+const ENGLISH_WORDS = new Set([
+  "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "is", "are", "was", "were",
+  "be", "been", "it", "that", "this", "you", "we", "i", "he", "she", "they", "with", "as",
+  "at", "from", "have", "has", "had", "not", "but", "so", "if", "my", "your", "what", "when",
+  "just", "like", "do", "did", "don't", "it's", "i'm", "we're", "that's", "there", "their",
+  "about", "because", "can", "can't", "would", "could", "should", "will", "going", "get",
+  "got", "know", "think", "people", "really", "right", "now", "then", "than", "them", "our",
+]);
+
+export function englishScore(text: string): number {
+  const tokens = text.toLowerCase().match(/[a-z']+/g) ?? [];
+  if (!tokens.length) return 0;
+  let hits = 0;
+  for (const token of tokens) if (ENGLISH_WORDS.has(token)) hits += 1;
+  const letters = text.replace(/\s/g, "");
+  const latin = letters.length ? (text.match(/[A-Za-z]/g) ?? []).length / letters.length : 0;
+  return (hits / tokens.length) * 0.75 + latin * 0.25;
+}
+
+export function looksEnglish(text: string, language: string): boolean {
+  const tag = language.trim().toLowerCase();
+  const score = englishScore(text);
+  if (tag.startsWith("en") || tag.includes("english")) return true;
+  if (tag) return score >= 0.32;
+  return score >= 0.3;
+}
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  pt: "Portuguese",
+  it: "Italian",
+  nl: "Dutch",
+  ru: "Russian",
+  ja: "Japanese",
+  ko: "Korean",
+  zh: "Chinese",
+  ar: "Arabic",
+  hi: "Hindi",
+  tr: "Turkish",
+  pl: "Polish",
+  sv: "Swedish",
+  vi: "Vietnamese",
+};
+
+export function languageName(code: string): string {
+  const tag = code.trim().toLowerCase();
+  if (!tag || tag.startsWith("en")) return "English";
+  return LANGUAGE_NAMES[tag.slice(0, 2)] ?? tag;
+}
+
 export function cueAt(cues: CaptionCue[], time: number): CaptionCue | undefined {
   return cues.find((cue) => time >= cue.start && time < cue.end);
 }
@@ -87,7 +139,8 @@ export function wordsToCues(words: Word[]): CaptionCue[] {
     const gap = word.start - prev.end;
     const dur = word.end - buf[0].start;
     const sentence = /[.!?…]$/.test(prev.text);
-    if (gap > gapLimit || joined.length > maxChars || dur > maxDur || (sentence && buf.length >= 3)) {
+    const clause = /[,;:]$/.test(prev.text) && joined.length > 24;
+    if (gap > gapLimit || joined.length > maxChars || dur > maxDur || sentence || clause) {
       flush();
     }
     buf.push(word);
