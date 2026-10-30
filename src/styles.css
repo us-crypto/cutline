@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "@fontsource/outfit/latin-400.css";
+@import "@fontsource/outfit/latin-500.css";
+@import "@fontsource/outfit/latin-600.css";
+@import "@fontsource/fraunces/latin-500.css";
+@import "@fontsource/fraunces/latin-600.css";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --color-ink: #12110e;
+  --color-paper: #f4efe4;
+  --color-amber: #e39b12;
+  --color-bay: #1c1b17;
+  --color-bay-2: #26241e;
+  --color-line: #3a362c;
+  --color-mist: #a39886;
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html {
+    background: var(--color-ink);
+    color: var(--color-paper);
+  }
+
+  body {
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  input[type="range"] {
+    accent-color: var(--color-amber);
+    height: 1.75rem;
+  }
+}
+
+@utility ring-hairline {
+  box-shadow: 0 0 0 1px rgba(244, 239, 228, 0.1);
+}
+
+.stage {
+  container-type: size;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+.stage-short {
+  height: min(68dvh, 40rem);
+  aspect-ratio: 9 / 16;
+  width: auto;
+  max-width: 100%;
+}
+
+.stage-long {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 70dvh;
+}
+
+.caption-text {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--color-paper);
+  font-size: 1.125rem;
+  font-size: 4.4cqh;
+}
+
+.caption-text[data-size="s"] {
+  font-size: 1rem;
+  font-size: 3.4cqh;
+}
+
+.caption-text[data-size="l"] {
+  font-size: 1.35rem;
+  font-size: 5.6cqh;
+}
+
+.caption-text[data-plate="outline"] {
+  -webkit-text-stroke: 0.08em #12110e;
+  paint-order: stroke fill;
+}
+
+.caption-text[data-plate="bar"] {
+  background: rgba(18, 17, 14, 0.72);
+  border-radius: 0.4em;
+  padding: 0.28em 0.5em;
+}
+
+.cue-live {
+  box-shadow:
+    inset 3px 0 0 0 var(--color-amber),
+    0 0 0 1px rgba(244, 239, 228, 0.1);
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
