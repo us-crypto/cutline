@@ -113,6 +113,22 @@ async function writeEnglish(words: Word[]): Promise<CaptionCue[]> {
   return cues;
 }
 
+export async function probeFrameRate(file: File): Promise<number | null> {
+  const { ALL_FORMATS, Input, BlobSource } = await import("mediabunny");
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return null;
+    const metrics = await track.computeFrameRateMetrics({ targetPacketCount: 80 });
+    const rate = metrics.medianFrameRate || metrics.averageFrameRate;
+    return Number.isFinite(rate) && rate > 1 ? rate : null;
+  } catch {
+    return null;
+  } finally {
+    input.dispose();
+  }
+}
+
 export async function readSpeech(
   file: File,
   start: number,

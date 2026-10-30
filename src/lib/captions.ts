@@ -52,6 +52,43 @@ export function outputBitrate(quality: QualityId, fps: number): number {
   return Math.round(QUALITIES[quality].bitrate * scale);
 }
 
+const QUALITY_LADDER: [QualityId, number][] = [
+  ["2160", 2160],
+  ["1440", 1440],
+  ["1080", 1080],
+  ["720", 720],
+  ["480", 480],
+  ["360", 360],
+  ["240", 240],
+];
+
+export function matchQuality(width: number, height: number): QualityId {
+  const side = Math.min(width, height);
+  let best: QualityId = "1080";
+  let bestDist = Infinity;
+  for (const [id, edge] of QUALITY_LADDER) {
+    const dist = Math.abs(edge - side);
+    if (dist < bestDist || (dist === bestDist && edge <= side)) {
+      best = id;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+export function matchFps(rate: number): FpsId {
+  let best = 30;
+  let bestDist = Infinity;
+  for (const fps of FRAME_RATES.map(Number)) {
+    const dist = Math.abs(fps - rate);
+    if (dist < bestDist || (dist === bestDist && fps < best)) {
+      best = fps;
+      bestDist = dist;
+    }
+  }
+  return String(best) as FpsId;
+}
+
 export const DEFAULT_LOOK: Look = {
   place: "bottom",
   plate: "outline",

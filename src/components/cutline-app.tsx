@@ -19,6 +19,8 @@ import {
   DEFAULT_LOOK,
   formatClock,
   FRAME_RATES,
+  matchFps,
+  matchQuality,
   outputSize,
   QUALITIES,
   splitCue,
@@ -32,7 +34,7 @@ import {
   type Look,
   type QualityId,
 } from "@/lib/captions";
-import { exportCaptionedMp4, MAX_READ_SECONDS, readSpeech, saveToGallery } from "@/lib/media";
+import { exportCaptionedMp4, MAX_READ_SECONDS, probeFrameRate, readSpeech, saveToGallery } from "@/lib/media";
 import { APP_VERSION, fetchUpdate, isNewer, type RemoteUpdate } from "@/lib/updates";
 
 type Clip = {
@@ -81,6 +83,9 @@ export function CutlineApp() {
   const [format, setFormat] = useState<FormatId>("long");
   const [quality, setQuality] = useState<QualityId>("1080");
   const [fps, setFps] = useState<FpsId>("30");
+  const [recommendedQuality, setRecommendedQuality] = useState<QualityId | null>(null);
+  const [recommendedFps, setRecommendedFps] = useState<FpsId | null>(null);
+  const [sourceFps, setSourceFps] = useState<number | null>(null);
   const [fit, setFit] = useState<FitMode>("cover");
   const [look, setLook] = useState<Look>(DEFAULT_LOOK);
   const [cues, setCues] = useState<CaptionCue[]>([]);
@@ -97,6 +102,8 @@ export function CutlineApp() {
   const [update, setUpdate] = useState<RemoteUpdate | null>(null);
   const [upToDate, setUpToDate] = useState(false);
   const cuesRef = useRef(cues);
+  const loadGen = useRef(0);
+  const fpsTouched = useRef(false);
   cuesRef.current = cues;
 
   useEffect(() => {
@@ -240,11 +247,26 @@ export function CutlineApp() {
       setTrimIn(0);
       setTrimOut(meta.duration);
       setFormat(meta.height > meta.width ? "short" : "long");
+      const qualityMatch = matchQuality(meta.width, meta.height);
+      setQuality(qualityMatch);
+      setRecommendedQuality(qualityMatch);
+      setRecommendedFps(null);
+      setSourceFps(null);
+      fpsTouched.current = false;
+      const generation = loadGen.current + 1;
+      loadGen.current = generation;
       setCues([]);
       setCleanFrom(0);
       setClock(0);
       setPlaying(false);
       setActiveId(null);
+      void probeFrameRate(file).then((rate) => {
+        if (loadGen.current !== generation || !rate) return;
+        const matched = matchFps(rate);
+        setSourceFps(rate);
+        setRecommendedFps(matched);
+        if (!fpsTouched.current) setFps(matched);
+      });
     } catch (reason) {
       URL.revokeObjectURL(url);
       setError(messageOf(reason));
@@ -530,15 +552,29 @@ export function CutlineApp() {
                 label="Quality"
                 value={quality}
                 onChange={setQuality}
-                options={(Object.keys(QUALITIES) as QualityId[]).map((id) => ({ id, label: QUALITIES[id].label }))}
+                options={(Object.keys(QUALITIES) as QualityId[]).map((id) => ({
+                  id,
+                  label: QUALITIES[id].label,
+                  hint: id === recommendedQuality ? "Recommended" : undefined,
+                }))}
               />
               <ChoiceRow
                 label="Frame rate"
                 value={fps}
-                onChange={setFps}
-                options={FRAME_RATES.map((id) => ({ id, label: `${id} fps` }))}
+                onChange={(next) => {
+                  fpsTouched.current = true;
+                  setFps(next);
+                }}
+                options={FRAME_RATES.map((id) => ({
+                  id,
+                  label: `${id} fps`,
+                  hint: id === recommendedFps ? "Recommended" : undefined,
+                }))}
               />
-              <p className="mt-2 text-sm text-mist">4K and 120 fps need a strong phone. Save sends the file to your gallery.</p>
+              <p className="mt-2 text-sm text-mist">
+                Recommended follows this video
+                {sourceFps ? ` · ${prettyRate(sourceFps)} fps` : ""}. You can still pick another size or frame rate.
+              </p>
 
               <div className="mt-4 rounded-card bg-bay p-4 ring-hairline">
                 <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -603,7 +639,8 @@ export function CutlineApp() {
                 <div className="min-w-0">
                   <h2 className="truncate text-lg font-medium">{clip.name}</h2>
                   <p className="text-sm text-mist tabular-nums">
-                    {clip.width}×{clip.height} · {formatClock(clip.duration)}
+                    {clip.width}×{clip.height}
+                    {sourceFps ? ` · ${prettyRate(sourceFps)} fps` : ""} · {formatClock(clip.duration)}
                   </p>
                 </div>
                 <button
@@ -898,6 +935,11 @@ function Landing({
   );
 }
 
+function prettyRate(rate: number): string {
+  const rounded = Math.round(rate);
+  return Math.abs(rate - rounded) < 0.15 ? String(rounded) : rate.toFixed(1);
+}
+
 function sizeLabel(format: FormatId, quality: QualityId): string {
   const size = outputSize(format, quality);
   return `${size.width}×${size.height}`;
@@ -957,7 +999,7 @@ function ChoiceRow<T extends string>({
 }: {
   label: string;
   value: T;
-  options: { id: T; label: string }[];
+  options: { id: T; label: string; hint?: string }[];
   onChange: (value: T) => void;
 }) {
   return (
@@ -973,11 +1015,14 @@ function ChoiceRow<T extends string>({
               aria-pressed={on}
               onClick={() => onChange(option.id)}
               className={clsx(
-                "inline-flex h-11 items-center rounded-full px-3 text-sm",
+                "inline-flex h-11 items-center gap-2 rounded-full px-3 text-sm",
                 on ? "bg-amber font-medium text-ink" : "bg-bay-2 text-mist ring-hairline",
               )}
             >
               {option.label}
+              {option.hint ? (
+                <span className={clsx("text-xs", on ? "text-ink/70" : "text-amber")}>{option.hint}</span>
+              ) : null}
             </button>
           );
         })}
