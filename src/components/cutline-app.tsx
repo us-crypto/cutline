@@ -18,7 +18,9 @@ import {
   cueId,
   DEFAULT_LOOK,
   formatClock,
-  FORMATS,
+  FRAME_RATES,
+  outputSize,
+  QUALITIES,
   splitCue,
   type CaptionCue,
   type CaptionPlace,
@@ -26,9 +28,11 @@ import {
   type CaptionSize,
   type FitMode,
   type FormatId,
+  type FpsId,
   type Look,
+  type QualityId,
 } from "@/lib/captions";
-import { downloadBlob, exportCaptionedMp4, MAX_READ_SECONDS, readSpeech } from "@/lib/media";
+import { exportCaptionedMp4, MAX_READ_SECONDS, readSpeech, saveToGallery } from "@/lib/media";
 import { APP_VERSION, fetchUpdate, isNewer, type RemoteUpdate } from "@/lib/updates";
 
 type Clip = {
@@ -75,6 +79,8 @@ export function CutlineApp() {
   const [clip, setClip] = useState<Clip | null>(null);
   const [hot, setHot] = useState(false);
   const [format, setFormat] = useState<FormatId>("long");
+  const [quality, setQuality] = useState<QualityId>("1080");
+  const [fps, setFps] = useState<FpsId>("30");
   const [fit, setFit] = useState<FitMode>("cover");
   const [look, setLook] = useState<Look>(DEFAULT_LOOK);
   const [cues, setCues] = useState<CaptionCue[]>([]);
@@ -341,24 +347,40 @@ export function CutlineApp() {
     if (!clip || busy) return;
     setBusy("export");
     setError("");
+    const label = QUALITIES[quality].label;
     const long = trimOut - trimIn > 8 * 60;
-    setStatus(long ? "Encoding 1080p. Long videos stay in memory — keep this tab open." : "Encoding 1080p…");
+    setStatus(
+      long
+        ? `Encoding ${label} at ${fps} fps. Long videos stay in memory — keep this tab open.`
+        : `Encoding ${label} at ${fps} fps…`,
+    );
     try {
       const blob = await exportCaptionedMp4({
         file: clip.file,
         format,
         fit,
         look,
+        quality,
+        fps,
         cues,
         trimStart: trimIn,
         trimEnd: trimOut,
         onProgress: (ratio) => {
-          setStatus(`Encoding ${Math.round(ratio * 100)}%`);
+          setStatus(`Encoding ${label} · ${Math.round(ratio * 100)}%`);
         },
       });
-      downloadBlob(blob, `cutline-${format}-1080p.mp4`);
-      setStatus("MP4 ready. It should be in your downloads.");
+      const filename = `cutline-${format}-${label}-${fps}fps.mp4`;
+      const saved = await saveToGallery(blob, filename);
+      setStatus(
+        saved === "shared"
+          ? "Pick Gallery or Photos in the share sheet to keep the video."
+          : "Saved to your downloads. On a phone, share that file into Gallery.",
+      );
     } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") {
+        setStatus("Save cancelled.");
+        return;
+      }
       setError(messageOf(reason));
       setStatus("");
     } finally {
@@ -489,8 +511,8 @@ export function CutlineApp() {
                   value={format}
                   onChange={setFormat}
                   options={[
-                    { id: "short", label: "Short", detail: FORMATS.short.detail },
-                    { id: "long", label: "Long", detail: FORMATS.long.detail },
+                    { id: "short", label: "Short", detail: sizeLabel("short", quality) },
+                    { id: "long", label: "Long", detail: sizeLabel("long", quality) },
                   ]}
                 />
                 <Segment
@@ -503,6 +525,20 @@ export function CutlineApp() {
                   ]}
                 />
               </div>
+
+              <ChoiceRow
+                label="Quality"
+                value={quality}
+                onChange={setQuality}
+                options={(Object.keys(QUALITIES) as QualityId[]).map((id) => ({ id, label: QUALITIES[id].label }))}
+              />
+              <ChoiceRow
+                label="Frame rate"
+                value={fps}
+                onChange={setFps}
+                options={FRAME_RATES.map((id) => ({ id, label: `${id} fps` }))}
+              />
+              <p className="mt-2 text-sm text-mist">4K and 120 fps need a strong phone. Save sends the file to your gallery.</p>
 
               <div className="mt-4 rounded-card bg-bay p-4 ring-hairline">
                 <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -783,7 +819,7 @@ export function CutlineApp() {
             <Action
               disabled={!!busy}
               onClick={() => void onExport()}
-              label={busy === "export" ? "Exporting" : "Export 1080p"}
+              label={busy === "export" ? "Saving" : "Save"}
               icon={<Download className="size-4" aria-hidden="true" />}
               primary
             />
@@ -834,7 +870,7 @@ function Landing({
       >
         <Film className="mb-4 size-8 text-amber" aria-hidden="true" />
         <span className="font-display text-3xl text-paper">Bring a video</span>
-        <span className="mt-2 text-sm text-mist">MP4, MOV, or WebM. The picture stays on this device.</span>
+        <span className="mt-2 text-sm text-mist">MP4, MOV, or WebM from your gallery. The picture stays on this device.</span>
       </button>
       {error ? (
         <p role="alert" className="mt-3 text-sm text-amber">
@@ -843,9 +879,9 @@ function Landing({
       ) : null}
       <ol className="mt-8 grid gap-3 md:grid-cols-3">
         {[
-          ["01", "Frame it", "Short is 1080×1920. Long is 1920×1080. Fill crops. Fit letterboxes."],
+          ["01", "Frame it", "Short is vertical. Long is wide. Pick 4K down to 240p, and 120 fps down to 15."],
           ["02", "Read the English", "Language is detected first. Only English is written into timed captions."],
-          ["03", "Export the MP4", "Captions are burned in. Upload the file to Shorts or YouTube."],
+          ["03", "Save it", "Captions are burned in. The share sheet can drop the MP4 into your gallery."],
         ].map(([index, title, copy]) => (
           <li key={index} className="rounded-card bg-bay p-4 ring-hairline">
             <p className="font-display text-amber">{index}</p>
@@ -860,6 +896,11 @@ function Landing({
       </p>
     </main>
   );
+}
+
+function sizeLabel(format: FormatId, quality: QualityId): string {
+  const size = outputSize(format, quality);
+  return `${size.width}×${size.height}`;
 }
 
 function Segment<T extends string>({
@@ -904,6 +945,43 @@ function Segment<T extends string>({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function ChoiceRow<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-sm font-medium tracking-wide text-mist uppercase">{label}</p>
+      <div role="group" aria-label={label} className="flex flex-wrap gap-1.5">
+        {options.map((option) => {
+          const on = option.id === value;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChange(option.id)}
+              className={clsx(
+                "inline-flex h-11 items-center rounded-full px-3 text-sm",
+                on ? "bg-amber font-medium text-ink" : "bg-bay-2 text-mist ring-hairline",
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

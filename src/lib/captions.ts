@@ -1,5 +1,7 @@
 export type FormatId = "short" | "long";
 export type FitMode = "cover" | "contain";
+export type QualityId = "2160" | "1440" | "1080" | "720" | "480" | "360" | "240";
+export type FpsId = "120" | "60" | "30" | "24" | "15";
 export type CaptionPlace = "bottom" | "middle" | "top";
 export type CaptionPlate = "outline" | "bar";
 export type CaptionSize = "s" | "m" | "l";
@@ -24,9 +26,31 @@ export type Look = {
 };
 
 export const FORMATS = {
-  short: { label: "Short", detail: "1080×1920", width: 1080, height: 1920 },
-  long: { label: "Long", detail: "1920×1080", width: 1920, height: 1080 },
+  short: { label: "Short" },
+  long: { label: "Long" },
 } as const;
+
+export const QUALITIES: Record<QualityId, { label: string; long: [number, number]; short: [number, number]; bitrate: number }> = {
+  "2160": { label: "4K", long: [3840, 2160], short: [2160, 3840], bitrate: 35_000_000 },
+  "1440": { label: "1440p", long: [2560, 1440], short: [1440, 2560], bitrate: 16_000_000 },
+  "1080": { label: "1080p", long: [1920, 1080], short: [1080, 1920], bitrate: 8_000_000 },
+  "720": { label: "720p", long: [1280, 720], short: [720, 1280], bitrate: 4_000_000 },
+  "480": { label: "480p", long: [854, 480], short: [480, 854], bitrate: 1_800_000 },
+  "360": { label: "360p", long: [640, 360], short: [360, 640], bitrate: 900_000 },
+  "240": { label: "240p", long: [426, 240], short: [240, 426], bitrate: 450_000 },
+};
+
+export const FRAME_RATES: FpsId[] = ["120", "60", "30", "24", "15"];
+
+export function outputSize(format: FormatId, quality: QualityId): { width: number; height: number } {
+  const [width, height] = format === "short" ? QUALITIES[quality].short : QUALITIES[quality].long;
+  return { width, height };
+}
+
+export function outputBitrate(quality: QualityId, fps: number): number {
+  const scale = Math.sqrt(Math.min(120, Math.max(15, fps)) / 30);
+  return Math.round(QUALITIES[quality].bitrate * scale);
+}
 
 export const DEFAULT_LOOK: Look = {
   place: "bottom",

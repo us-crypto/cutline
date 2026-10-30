@@ -5,13 +5,17 @@ import {
   cueId,
   languageName,
   looksEnglish,
+  outputBitrate,
+  outputSize,
+  QUALITIES,
   wordsToCues,
   type CaptionCue,
   type FitMode,
   type FormatId,
+  type FpsId,
   type Look,
+  type QualityId,
   type Word,
-  FORMATS,
 } from "@/lib/captions";
 
 const CHUNK_SECONDS = 110;
@@ -167,6 +171,8 @@ export async function exportCaptionedMp4(options: {
   format: FormatId;
   fit: FitMode;
   look: Look;
+  quality: QualityId;
+  fps: FpsId;
   cues: CaptionCue[];
   trimStart: number;
   trimEnd: number;
@@ -187,6 +193,10 @@ export async function exportCaptionedMp4(options: {
       if (!/unsupported configuration|isConfigSupported/i.test(message)) throw error;
     }
   }
+  const label = QUALITIES[options.quality].label;
+  if (last instanceof Error && /unsupported configuration|isConfigSupported/i.test(last.message)) {
+    throw new Error(`${label} at ${options.fps} fps isn't supported on this device. Choose a lower size or frame rate.`);
+  }
   throw last instanceof Error ? last : new Error("Couldn't encode that video.");
 }
 
@@ -196,6 +206,8 @@ async function encodeMp4(
     format: FormatId;
     fit: FitMode;
     look: Look;
+    quality: QualityId;
+    fps: FpsId;
     cues: CaptionCue[];
     trimStart: number;
     trimEnd: number;
@@ -205,21 +217,13 @@ async function encodeMp4(
 ): Promise<Blob> {
   const { ALL_FORMATS, Input, BlobSource, Output, Mp4OutputFormat, BufferTarget, Conversion, Quality } =
     await import("mediabunny");
-  const spec = FORMATS[options.format];
+  const { width, height } = outputSize(options.format, options.quality);
+  const fps = Number(options.fps);
   const input = new Input({ source: new BlobSource(options.file), formats: ALL_FORMATS });
   try {
     const videoTrack = await input.getPrimaryVideoTrack();
     if (!videoTrack) throw new Error("That file has no video track.");
-    let frameRate: number | undefined;
-    try {
-      const stats = await videoTrack.computePacketStats(30);
-      if (stats.averagePacketRate > 40) frameRate = 30;
-    } catch {
-      frameRate = undefined;
-    }
 
-    const width = spec.width;
-    const height = spec.height;
     const target = new BufferTarget();
     const output = new Output({
       format: new Mp4OutputFormat({ fastStart: "in-memory" }),
@@ -243,11 +247,11 @@ async function encodeMp4(
         width,
         height,
         fit: options.fit,
-        frameRate,
+        frameRate: fps,
         allowTransformationMetadata: false,
         hardwareAcceleration,
         keyFrameInterval: 2,
-        quality: new Quality({ bitrate: 8_000_000, bitrateMode: "variable" }),
+        quality: new Quality({ bitrate: outputBitrate(options.quality, fps), bitrateMode: "variable" }),
         processedWidth: width,
         processedHeight: height,
         process: (sample) => {
@@ -298,4 +302,15 @@ export function downloadBlob(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+export async function saveToGallery(blob: Blob, filename: string): Promise<"shared" | "downloaded"> {
+  const file = new File([blob], filename, { type: "video/mp4" });
+  const payload = { files: [file], title: filename };
+  if (typeof navigator.share === "function" && navigator.canShare?.(payload)) {
+    await navigator.share(payload);
+    return "shared";
+  }
+  downloadBlob(blob, filename);
+  return "downloaded";
 }
