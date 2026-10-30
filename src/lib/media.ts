@@ -8,7 +8,9 @@ import {
   outputBitrate,
   outputSize,
   QUALITIES,
+  timeWords,
   wordsToCues,
+  activeWordIndex,
   type CaptionCue,
   type FitMode,
   type FormatId,
@@ -85,11 +87,13 @@ function cuesFromLines(words: Word[], lines: { from: number; to: number; text: s
       return null;
     }
     if (line.text) {
+      const slice = words.slice(from, to + 1);
       cues.push({
         id: cueId(),
         start: words[from].start,
         end: Math.max(words[to].end, words[from].start + 0.3),
         text: line.text,
+        words: timeWords(line.text, words[from].start, words[to].end, slice),
       });
     }
     cursor = to + 1;
@@ -282,8 +286,20 @@ async function encodeMp4(
           sample.draw(ctx, 0, 0, width, height);
           const sourceTime = sample.timestamp + options.trimStart;
           const cue = cueAt(options.cues, sourceTime);
-          const text = cue?.text.trim() ?? "";
-          if (text) paintCaption(ctx, width, height, text, options.look, options.format);
+          const tokens = cue?.words?.length
+            ? cue.words.map((word) => word.text)
+            : (cue?.text.trim().split(/\s+/).filter(Boolean) ?? []);
+          if (tokens.length) {
+            paintCaption(
+              ctx,
+              width,
+              height,
+              tokens,
+              cue?.words?.length ? activeWordIndex(cue.words, sourceTime) : -1,
+              options.look,
+              options.format,
+            );
+          }
           return canvas;
         },
       },

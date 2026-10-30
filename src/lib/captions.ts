@@ -6,11 +6,18 @@ export type CaptionPlace = "bottom" | "middle" | "top";
 export type CaptionPlate = "outline" | "bar";
 export type CaptionSize = "s" | "m" | "l";
 
+export type CaptionWord = {
+  text: string;
+  start: number;
+  end: number;
+};
+
 export type CaptionCue = {
   id: string;
   start: number;
   end: number;
   text: string;
+  words: CaptionWord[];
 };
 
 export type Word = {
@@ -165,6 +172,40 @@ export function cueAt(cues: CaptionCue[], time: number): CaptionCue | undefined 
   return cues.find((cue) => time >= cue.start && time < cue.end);
 }
 
+export function timeWords(text: string, start: number, end: number, source?: CaptionWord[]): CaptionWord[] {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [];
+  const spanStart = source?.[0]?.start ?? start;
+  const spanEnd = Math.max(source?.[source.length - 1]?.end ?? end, spanStart + 0.08);
+  if (source && source.length === tokens.length) {
+    return tokens.map((token, index) => ({
+      text: token,
+      start: source[index].start,
+      end: Math.max(source[index].end, source[index].start + 0.04),
+    }));
+  }
+  const step = (spanEnd - spanStart) / tokens.length;
+  return tokens.map((token, index) => ({
+    text: token,
+    start: spanStart + index * step,
+    end: index === tokens.length - 1 ? spanEnd : spanStart + (index + 1) * step,
+  }));
+}
+
+export function activeWordIndex(words: CaptionWord[], time: number): number {
+  if (!words.length) return -1;
+  for (let index = 0; index < words.length; index++) {
+    if (time >= words[index].start && time < words[index].end) return index;
+  }
+  let last = -1;
+  for (let index = 0; index < words.length; index++) {
+    if (words[index].start <= time) last = index;
+    else break;
+  }
+  if (last >= 0 && time <= words[words.length - 1].end + 0.15) return last;
+  return -1;
+}
+
 export function wordsToCues(words: Word[]): CaptionCue[] {
   const maxChars = 42;
   const maxDur = 4;
@@ -182,7 +223,7 @@ export function wordsToCues(words: Word[]): CaptionCue[] {
     if (text) {
       const start = buf[0].start;
       const end = Math.max(buf[buf.length - 1].end, start + 0.35);
-      cues.push({ id: cueId(), start, end, text });
+      cues.push({ id: cueId(), start, end, text, words: buf.map((word) => ({ ...word })) });
     }
     buf = [];
   };
@@ -217,17 +258,32 @@ export function wordsToCues(words: Word[]): CaptionCue[] {
 
 export function splitCue(cue: CaptionCue, at: number): [CaptionCue, CaptionCue] | null {
   if (at <= cue.start + 0.12 || at >= cue.end - 0.12) return null;
-  const words = cue.text.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 2) {
+  const timed = cue.words.length ? cue.words : timeWords(cue.text, cue.start, cue.end);
+  if (timed.length < 2) {
     return [
-      { id: cueId(), start: cue.start, end: at, text: cue.text },
-      { id: cueId(), start: at, end: cue.end, text: cue.text },
+      { id: cueId(), start: cue.start, end: at, text: cue.text, words: timeWords(cue.text, cue.start, at) },
+      { id: cueId(), start: at, end: cue.end, text: cue.text, words: timeWords(cue.text, at, cue.end) },
     ];
   }
-  const ratio = (at - cue.start) / (cue.end - cue.start);
-  const count = Math.min(words.length - 1, Math.max(1, Math.round(words.length * ratio)));
+  let count = timed.findIndex((word) => at < word.end);
+  if (count < 1) count = 1;
+  if (count >= timed.length) count = timed.length - 1;
+  const left = timed.slice(0, count);
+  const right = timed.slice(count);
   return [
-    { id: cueId(), start: cue.start, end: at, text: words.slice(0, count).join(" ") },
-    { id: cueId(), start: at, end: cue.end, text: words.slice(count).join(" ") },
+    {
+      id: cueId(),
+      start: cue.start,
+      end: at,
+      text: left.map((word) => word.text).join(" "),
+      words: left.map((word, index) => ({ ...word, end: index === left.length - 1 ? at : word.end })),
+    },
+    {
+      id: cueId(),
+      start: at,
+      end: cue.end,
+      text: right.map((word) => word.text).join(" "),
+      words: right.map((word, index) => ({ ...word, start: index === 0 ? at : word.start })),
+    },
   ];
 }

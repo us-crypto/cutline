@@ -109,6 +109,14 @@
   padding: 0.28em 0.5em;
 }
 
+.spoken-word {
+  background: #e39b12;
+  color: #12110e;
+  border-radius: 0.16em;
+  padding: 0 0.12em;
+  -webkit-text-stroke: 0;
+}
+
 .cue-live {
   box-shadow:
     inset 3px 0 0 0 var(--color-amber),

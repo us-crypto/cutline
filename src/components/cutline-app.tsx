@@ -24,6 +24,8 @@ import {
   outputSize,
   QUALITIES,
   splitCue,
+  timeWords,
+  activeWordIndex,
   type CaptionCue,
   type CaptionPlace,
   type CaptionPlate,
@@ -277,7 +279,7 @@ export function CutlineApp() {
     if (!clip) return;
     const start = Math.min(clock, Math.max(trimIn, clip.duration - 0.4));
     const end = Math.min(clip.duration, Math.max(start + 2, trimOut > start ? Math.min(trimOut, start + 2) : start + 2));
-    const cue: CaptionCue = { id: cueId(), start, end: Math.max(end, start + 0.4), text: "" };
+    const cue: CaptionCue = { id: cueId(), start, end: Math.max(end, start + 0.4), text: "", words: [] };
     setCues((prev) => [...prev, cue].sort((a, b) => a.start - b.start));
     setActiveId(cue.id);
   }
@@ -325,7 +327,11 @@ export function CutlineApp() {
         prev.map((cue, index) => {
           const local = index - from;
           if (local < 0 || local >= result.lines.length) return cue;
-          return { ...cue, text: result.lines[local] };
+          return {
+            ...cue,
+            text: result.lines[local],
+            words: timeWords(result.lines[local], cue.start, cue.end, cue.words),
+          };
         }),
       );
       const nextFrom = from + slice.length >= cues.length ? 0 : from + slice.length;
@@ -411,6 +417,12 @@ export function CutlineApp() {
   }
 
   const active = cues.find((cue) => cue.id === activeId);
+  const spokenWords = active
+    ? active.words.length
+      ? active.words
+      : timeWords(active.text, active.start, active.end)
+    : [];
+  const spokenIndex = active ? activeWordIndex(spokenWords, clock) : -1;
   const readSpan = Math.max(0, trimOut - trimIn);
 
   return (
@@ -423,7 +435,10 @@ export function CutlineApp() {
             <p className="mt-2 text-xs text-mist">
               v{APP_VERSION}
               {upToDate ? " · Up to date" : ""}
-              {" · © 2026 Cutline. All rights reserved."}
+              {" · © 2026 Cutline. All rights reserved. "}
+              <a className="underline" href="https://github.com/us-crypto/cutline-updates/releases/download/v1.1.0/Cutline-1.1.0.apk">
+                Android app
+              </a>
             </p>
           </div>
           {clip ? (
@@ -506,7 +521,11 @@ export function CutlineApp() {
                     )}
                   >
                     <p className="caption-text" data-size={look.size} data-plate={look.plate}>
-                      {active.text}
+                      {spokenWords.map((word, index) => (
+                        <span key={`${word.start}-${index}`} className={index === spokenIndex ? "spoken-word" : undefined}>
+                          {word.text}{" "}
+                        </span>
+                      ))}
                     </p>
                   </div>
                 ) : null}
@@ -721,6 +740,15 @@ export function CutlineApp() {
                           </IconButton>
                         </span>
                       </div>
+                      {cue.id === activeId && spokenWords.length ? (
+                        <p className="mb-2 text-base leading-snug text-paper">
+                          {spokenWords.map((word, index) => (
+                            <span key={`${word.start}-${index}`} className={index === spokenIndex ? "spoken-word" : undefined}>
+                              {word.text}{" "}
+                            </span>
+                          ))}
+                        </p>
+                      ) : null}
                       <textarea
                         aria-label={`Caption at ${formatClock(cue.start)}`}
                         value={cue.text}
@@ -728,7 +756,13 @@ export function CutlineApp() {
                         className="w-full resize-none rounded-xl bg-ink px-3 py-2 text-base text-paper ring-hairline"
                         onChange={(event) => {
                           const text = event.target.value;
-                          setCues((prev) => prev.map((item) => (item.id === cue.id ? { ...item, text } : item)));
+                          setCues((prev) =>
+                            prev.map((item) =>
+                              item.id === cue.id
+                                ? { ...item, text, words: timeWords(text, item.start, item.end, item.words) }
+                                : item,
+                            ),
+                          );
                         }}
                       />
                       <div className="mt-2 grid grid-cols-2 gap-2">
