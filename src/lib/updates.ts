@@ -1,7 +1,7 @@
 export const APP_VERSION = "1.0.0";
 
 export const UPDATE_MANIFEST =
-  "https://raw.githubusercontent.com/us-crypto/cutline-updates/main/version.json";
+  "https://api.github.com/repos/us-crypto/cutline-updates/contents/version.json?ref=main";
 
 export type RemoteUpdate = {
   version: string;
@@ -22,7 +22,10 @@ export function isNewer(remote: string, local: string): boolean {
 }
 
 export async function fetchUpdate(): Promise<RemoteUpdate | null> {
-  const response = await fetch(`${UPDATE_MANIFEST}?t=${Date.now()}`, { cache: "no-store" });
+  const response = await fetch(UPDATE_MANIFEST, {
+    cache: "no-store",
+    headers: { Accept: "application/vnd.github.raw" },
+  });
   if (!response.ok) return null;
   const data = (await response.json()) as { version?: unknown; notes?: unknown; released?: unknown };
   if (typeof data.version !== "string" || !data.version.trim()) return null;
